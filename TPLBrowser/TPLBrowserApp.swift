@@ -12,6 +12,7 @@ struct TPLBrowserApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .accentColor(.purple) // Example accent color
         }
     }
 }
