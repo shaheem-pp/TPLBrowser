@@ -1,4 +1,3 @@
-
 import SwiftUI
 import MapKit
 import CoreLocation
@@ -47,7 +46,11 @@ struct MapView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: {
-                    zoomToUserLocationAndFindNearestLibrary()
+                    if locationManager.authorizationStatus == .authorizedWhenInUse || locationManager.authorizationStatus == .authorizedAlways {
+                        zoomToUserLocationAndFindNearestLibrary()
+                    } else {
+                        showingLocationAlert = true
+                    }
                 }) {
                     Label("My Location", systemImage: "location.fill")
                 }
@@ -64,6 +67,16 @@ struct MapView: View {
                     .cornerRadius(10)
                     .padding(.bottom)
             }
+        }
+        .alert("Location Access Denied", isPresented: $showingLocationAlert) {
+            Button("OK") { }
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        } message: {
+            Text("Please enable location services in Settings to use this feature.")
         }
     }
 
@@ -138,8 +151,11 @@ struct MapView: View {
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     @Published var lastKnownLocation: CLLocation? = nil
+    @Published var authorizationStatus: CLAuthorizationStatus
 
     override init() {
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        authorizationStatus = manager.authorizationStatus
         super.init()
         manager.delegate = self
     }
@@ -154,6 +170,10 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.stopUpdatingLocation() // Stop updating after getting a location
     }
 
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
+    }
+
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Location manager failed with error: \(error.localizedDescription)")
     }
@@ -161,6 +181,11 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 struct MapView_Previews: PreviewProvider {
     static var previews: some View {
-        MapView(libraries: DataService.loadLibraries())
+        // Provide sample libraries for the preview
+        let sampleLibraries: [Library] = [
+            Library(id: 1, branchCode: "AB", branchName: "Albion", address: "1515 Albion Road", postalCode: "M9V 1B2", website: "https://www.tpl.ca/albion", telephone: "416-394-5170", squareFootage: "29000", publicParking: "59", kidsStop: 1, leadingReading: 1, clc: 1, dih: 1, teenCouncil: 1, youthHub: 1, adultLiteracyProgram: 1, workstations: 38, serviceTier: "DL", lat: "43.739826", long: "-79.584096", nbhdNo: 2, nbhdName: "Mount Olive-Silverstone-Jamestown", tplnia: 1, wardNo: 1, wardName: "Etobicoke North", presentSiteYear: 2017),
+            Library(id: 2, branchCode: "ACD", branchName: "Albert Campbell", address: "496 Birchmount Road", postalCode: "M1K 1N8", website: "https://www.tpl.ca/albertcampbell", telephone: "416-396-8890", squareFootage: "28957", publicParking: "45", kidsStop: 0, leadingReading: 1, clc: 1, dih: 1, teenCouncil: 1, youthHub: 1, adultLiteracyProgram: 0, workstations: 36, serviceTier: "DL", lat: "43.708019", long: "-79.269252", nbhdNo: 120, nbhdName: "Clairlea-Birchmount", tplnia: 1, wardNo: 20, wardName: "Scarborough Southwest", presentSiteYear: 1971)
+        ]
+        MapView(libraries: sampleLibraries)
     }
 }

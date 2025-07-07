@@ -1,4 +1,3 @@
-
 //
 //  LibraryDetailView.swift
 //  TPLBrowser
@@ -11,28 +10,39 @@
 import SwiftUI
 import MapKit
 
+// MARK: - LibraryDetailView
 struct LibraryDetailView: View {
     let library: Library // The library object passed to this view.
+    var dataService: DataServiceProtocol.Type = DataService.self // Injected DataService dependency
 
+    // MARK: - State Properties
     // State variables to hold all visits and events data.
-    // These are loaded once when the view appears.
+    // These are populated asynchronously when the view appears.
     @State private var allVisits: [Visits] = []
     @State private var allEvents: [Event] = []
+    // State properties to control the visibility of loading indicators for visits and events.
+    @State private var isLoadingVisits = true
+    @State private var isLoadingEvents = true
+    // State properties to store any errors during data loading for visits and events.
+    @State private var showingVisitsErrorAlert = false
+    @State private var visitsErrorMessage: String = ""
+    @State private var showingEventsErrorAlert = false
+    @State private var eventsErrorMessage: String = ""
 
-    // Computed property to filter visits relevant to the current library.
-    // It matches the library's branchCode with the visit record's branchCode.
+    // MARK: - Computed Properties
+    // Filters visits relevant to the current library and sorts them by year.
     var relevantVisits: [Visits] {
         allVisits.filter { $0.branchCode == library.branchCode }
             .sorted { $0.year > $1.year } // Sort by year, newest first
     }
 
-    // Computed property to filter events relevant to the current library.
-    // It matches the library's branchName with the event's library name.
+    // Filters events relevant to the current library and sorts them by start date.
     var relevantEvents: [Event] {
         allEvents.filter { $0.library == library.branchName }
-            .sorted { $0.startdate < $1.startdate } // Sort by start date, earliest first
+            .sorted { $0.startdate ?? Date.distantFuture < $1.startdate ?? Date.distantFuture } // Sort by start date, earliest first
     }
 
+    // MARK: - Body
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -56,6 +66,8 @@ struct LibraryDetailView: View {
                 // Basic Library Information (Address, Website, Phone)
                 Group {
                     DetailRow(title: "Address", content: library.address)
+                        .accessibilityElement(children: .combine) // Combine title and content for accessibility
+                        .accessibilityLabel("Address: \(library.address)")
 
                     // Display website as a clickable link if available
                     if let url = URL(string: library.website) {
@@ -63,9 +75,12 @@ struct LibraryDetailView: View {
                             DetailRow(title: "Website", content: library.website)
                                 .foregroundColor(.blue)
                         }
+                        .accessibilityLabel("Website: \(library.website)")
                     }
 
                     DetailRow(title: "Phone", content: library.telephone)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Phone: \(library.telephone)")
                 }
                 .padding(.horizontal)
 
@@ -73,6 +88,8 @@ struct LibraryDetailView: View {
                 if let nbhdName = library.nbhdName {
                     DetailRow(title: "Neighborhood", content: nbhdName)
                         .padding(.horizontal)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Neighborhood: \(nbhdName)")
                 }
 
                 // Get Directions Button
@@ -91,6 +108,7 @@ struct LibraryDetailView: View {
                         .cornerRadius(10)
                 }
                 .padding(.horizontal)
+                .accessibilityLabel("Get Directions to \(library.branchName)")
 
                 Divider() // Visual separator
 
@@ -99,17 +117,26 @@ struct LibraryDetailView: View {
                     Text("Services")
                         .font(.headline)
                         .padding(.horizontal)
+                        .accessibilityAddTraits(.isHeader) // Mark as a header for accessibility
 
-                    // Display services using a grid for better layout
+                    // Define all possible services with their properties.
+                    let services: [(condition: Int?, icon: String, text: String, color: Color)] = [
+                        (library.kidsStop, "figure.and.child.holdinghands", "KidsStop", .blue),
+                        (library.leadingReading, "text.book.closed", "Leading Reading", .orange),
+                        (library.clc, "laptopcomputer", "CLC", .green),
+                        (library.dih, "lightbulb", "DIH", .yellow),
+                        (library.teenCouncil, "person.3", "Teen Council", .purple),
+                        (library.youthHub, "person.2.wave.2", "Youth Hub", .red),
+                        (library.adultLiteracyProgram, "textformat.abc", "Adult Literacy", .indigo)
+                    ]
+
+                    // Display services using a grid for better layout.
+                    // Only display services where the condition is 1 (true).
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 10) {
-                        // Each ServiceBadge represents a specific service with an icon and text.
-                        if library.kidsStop == 1 { ServiceBadge(icon: "figure.and.child.holdinghands", text: "KidsStop", color: .blue) }
-                        if library.leadingReading == 1 { ServiceBadge(icon: "text.book.closed", text: "Leading Reading", color: .orange) }
-                        if library.clc == 1 { ServiceBadge(icon: "laptopcomputer", text: "CLC", color: .green) }
-                        if library.dih == 1 { ServiceBadge(icon: "lightbulb", text: "DIH", color: .yellow) }
-                        if library.teenCouncil == 1 { ServiceBadge(icon: "person.3", text: "Teen Council", color: .purple) }
-                        if library.youthHub == 1 { ServiceBadge(icon: "person.2.wave.2", text: "Youth Hub", color: .red) }
-                        if library.adultLiteracyProgram == 1 { ServiceBadge(icon: "textformat.abc", text: "Adult Literacy", color: .indigo) }
+                        ForEach(services.filter { $0.condition == 1 }, id: \.text) { service in
+                            ServiceBadge(icon: service.icon, text: service.text, color: service.color)
+                                .accessibilityLabel("\(service.text) service available")
+                        }
                     }
                     .padding(.horizontal)
                 }
@@ -121,14 +148,15 @@ struct LibraryDetailView: View {
                     Text("Annual Visits")
                         .font(.headline)
                         .padding(.horizontal)
+                        .accessibilityAddTraits(.isHeader)
 
-                    if relevantVisits.isEmpty {
-                        Text("No visit data available for this branch.")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                    if isLoadingVisits { // Show loading indicator for visits
+                        ProgressView("Loading Visits...")
                             .padding(.horizontal)
-                    } else {
-                        // Display visits in a list, showing year and number of visits.
+                    } else if relevantVisits.isEmpty { // Show message if no visits found
+                        ContentUnavailableView("No Visit Data", systemImage: "chart.bar.fill", description: Text("No annual visit data available for this branch."))
+                            .padding(.horizontal)
+                    } else { // Display visits if loaded
                         ForEach(relevantVisits) { visit in
                             HStack {
                                 Text("\(visit.year):")
@@ -138,6 +166,8 @@ struct LibraryDetailView: View {
                                     .font(.body)
                             }
                             .padding(.horizontal)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Year \(visit.year): \(visit.visits) visits")
                         }
                     }
                 }
@@ -149,11 +179,13 @@ struct LibraryDetailView: View {
                     Text("Upcoming Events")
                         .font(.headline)
                         .padding(.horizontal)
+                        .accessibilityAddTraits(.isHeader)
 
-                    if relevantEvents.isEmpty {
-                        Text("No upcoming events for this branch.")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                    if isLoadingEvents { // Show loading indicator for events
+                        ProgressView("Loading Events...")
+                            .padding(.horizontal)
+                    } else if relevantEvents.isEmpty { // Show message if no events found
+                        ContentUnavailableView("No Upcoming Events", systemImage: "calendar", description: Text("No upcoming events scheduled for this branch."))
                             .padding(.horizontal)
                     } else {
                         // Display events in a list, showing title, dates, and times.
@@ -162,34 +194,40 @@ struct LibraryDetailView: View {
                                 Text(event.title)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
-                                Text("Dates: \(event.startdate) to \(event.enddate)")
+                                    .accessibilityLabel(event.title)
+                                Text("Dates: \(event.formattedStartDate) to \(event.formattedEndDate)")
                                     .font(.caption)
                                     .foregroundColor(.gray)
-                                if let startTime = event.starttime, startTime != "None" {
-                                    Text("Time: \(startTime)")
+                                    .accessibilityLabel("Dates: from \(event.formattedStartDate) to \(event.formattedEndDate)")
+                                if event.starttime != nil {
+                                    Text("Time: \(event.formattedStartTime)")
                                         .font(.caption)
                                         .foregroundColor(.gray)
+                                        .accessibilityLabel("Start time: \(event.formattedStartTime)")
                                 }
-                                if let endTime = event.endtime, endTime != "None" {
-                                    Text("End Time: \(endTime)")
+                                if event.endtime != nil {
+                                    Text("End Time: \(event.formattedEndTime)")
                                         .font(.caption)
                                         .foregroundColor(.gray)
+                                        .accessibilityLabel("End time: \(event.formattedEndTime)")
                                 }
                                 if let location = event.location, location != "None" {
                                     Text("Location: \(location)")
                                         .font(.caption)
                                         .foregroundColor(.gray)
+                                        .accessibilityLabel("Location: \(location)")
                                 }
-                                Text(event.description)
+                                ExpandableText(event.description, lineLimit: 3)
                                     .font(.caption)
-                                    .lineLimit(3) // Limit description to 3 lines
                                     .padding(.top, 2)
+                                    .accessibilityLabel(event.description)
                             }
                             .padding(.horizontal)
                             .padding(.vertical, 5)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(8)
                             .padding(.bottom, 5)
+                            .accessibilityElement(children: .contain) // Make the whole event item accessible
                         }
                     }
                 }
@@ -201,9 +239,42 @@ struct LibraryDetailView: View {
         .navigationTitle("Details") // Navigation bar title
         .navigationBarTitleDisplayMode(.inline) // Display title inline
         .onAppear { // Action performed when the view appears
-            // Load all visits and events data when the view is shown.
-            allVisits = DataService.loadVisits()
-            allEvents = DataService.loadEvents()
+            // Load visits asynchronously.
+            dataService.loadVisitsAsync { result in
+                isLoadingVisits = false // Hide loading indicator once loading is complete.
+                switch result {
+                case .success(let loadedVisits):
+                    self.allVisits = loadedVisits
+                case .failure(let error):
+                    self.visitsErrorMessage = error.localizedDescription
+                    self.showingVisitsErrorAlert = true
+                }
+            }
+
+            // Load events asynchronously.
+            dataService.loadEventsAsync { result in
+                isLoadingEvents = false // Hide loading indicator once loading is complete.
+                switch result {
+                case .success(let loadedEvents):
+                    self.allEvents = loadedEvents
+                case .failure(let error):
+                    self.eventsErrorMessage = error.localizedDescription
+                    self.showingEventsErrorAlert = true
+                }
+            }
+        }
+        // MARK: - Error Alerts
+        // Alert for visits loading errors.
+        .alert("Visits Loading Error", isPresented: $showingVisitsErrorAlert) {
+            Button("OK") { }
+        } message: {
+            Text(visitsErrorMessage)
+        }
+        // Alert for events loading errors.
+        .alert("Events Loading Error", isPresented: $showingEventsErrorAlert) {
+            Button("OK") { }
+        } message: {
+            Text(eventsErrorMessage)
         }
     }
 }
@@ -253,8 +324,9 @@ struct ServiceBadge: View {
 struct LibraryDetailView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            // Loads the first library from the data for preview purposes.
-            LibraryDetailView(library: DataService.loadLibraries().first!)
+            // Provide a sample library for the preview
+            let sampleLibrary = Library(id: 1, branchCode: "AB", branchName: "Albion", address: "1515 Albion Road", postalCode: "M9V 1B2", website: "https://www.tpl.ca/albion", telephone: "416-394-5170", squareFootage: "29000", publicParking: "59", kidsStop: 1, leadingReading: 1, clc: 1, dih: 1, teenCouncil: 1, youthHub: 1, adultLiteracyProgram: 1, workstations: 38, serviceTier: "DL", lat: "43.739826", long: "-79.584096", nbhdNo: 2, nbhdName: "Mount Olive-Silverstone-Jamestown", tplnia: 1, wardNo: 1, wardName: "Etobicoke North", presentSiteYear: 2017)
+            LibraryDetailView(library: sampleLibrary)
         }
     }
 }
